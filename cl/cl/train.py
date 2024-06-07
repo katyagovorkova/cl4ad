@@ -1,6 +1,8 @@
 import numpy as np
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import os
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -11,6 +13,9 @@ torch.autograd.set_detect_anomaly(True)
 import losses
 from models import CVAE
 
+id = os.getenv('SLURM_JOB_ID')
+if id is None:
+    id = 'default'
 
 class TorchCLDataset(Dataset):
     'Characterizes a dataset for PyTorch'
@@ -43,11 +48,14 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
 
+    # background dataset
     dataset = np.load(args.background_dataset)
+    visualize = args.visualize
 
     # criterion = losses.SimCLRLoss()
     criterion = losses.VICRegLoss()
 
+    # load the datasets for pytorch
     train_data_loader = DataLoader(
         TorchCLDataset(
             dataset['x_train'],
@@ -91,6 +99,7 @@ def main(args):
         optimizer, schedulers=[scheduler_1, scheduler_2, scheduler_3], milestones=[5, 20])
 
 
+    # training
     def train_one_epoch(epoch_index):
         running_sim_loss = 0.
         last_sim_loss = 0.
@@ -118,6 +127,7 @@ def main(args):
         return last_sim_loss
 
 
+    # validation 
     def val_one_epoch(epoch_index):
         running_sim_loss = 0.
         last_sim_loss = 0.
@@ -139,6 +149,41 @@ def main(args):
                 running_sim_loss = 0.
 
         return last_sim_loss
+    
+    # early stopping
+    class EarlyStopping:
+        def __init__(self, save_path, patience=10, verbose=False, delta=0):
+            """
+            Args:
+                save_path (str): Path to save the checkpoint model.
+                patience (int): How long to wait after last time validation loss improved.
+                                Default: 10
+                verbose (bool): If True, prints a message for each validation loss improvement. 
+                                Default: False
+                delta (float): Minimum change in the monitored quantity to qualify as an improvement.
+                            Default: 0
+            """
+            self.save_path = save_path
+            self.patience = patience
+            self.verbose = verbose
+            self.delta = delta
+            self.best_loss = float('inf')
+            self.epochs_no_improve = 0
+            self.should_stop = False
+
+        def check(self, val_loss, model):
+            if val_loss < self.best_loss - self.delta:
+                if self.verbose:
+                    print(f'Validation loss decreased ({self.best_loss:.6f} --> {val_loss:.6f}).  Saving model ...')
+                torch.save(model.state_dict(), self.save_path)
+                self.best_loss = val_loss
+                self.epochs_no_improve = 0
+            else:
+                self.epochs_no_improve += 1
+                if self.epochs_no_improve >= self.patience:
+                    self.should_stop = True
+
+    early_stopping = EarlyStopping(save_path=args.model_name, patience=10, verbose=True)
 
     if args.train:
         train_losses = []
@@ -151,7 +196,8 @@ def main(args):
             train_losses.append(avg_train_loss)
 
             # no gradient tracking, for validation
-            model.train(False)
+            # model.train(False)
+            model.eval()
             avg_val_loss = val_one_epoch(epoch)
             val_losses.append(avg_val_loss)
 
@@ -159,17 +205,42 @@ def main(args):
 
             scheduler.step()
 
-        torch.save(model.state_dict(), args.model_name)
+            early_stopping.check(avg_val_loss, model)
+            if early_stopping.should_stop:
+                print(f"Stopping early at epoch {epoch}")
+                break
+
+        torch.save(model.state_dict(), f'output/vae_{id}.pth')
     else:
         model.load_state_dict(torch.load(args.model_name))
         model.eval()
 
+
+    # plot the loss curve
+
     plt.plot(train_losses, label='train')
     plt.plot(val_losses, label='val')
+
+    # set the y range
+    plt.ylim([12, 20])
+
+    # add grid
+    plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(10))  # Set major ticks for every 10 epochs
+    plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(1))  # Set major ticks for every 1 on y-axis
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+
     plt.xlabel('iterations')
     plt.ylabel('Loss')
     plt.legend()
-    plt.savefig('output/loss.pdf')
+
+    # save loss as different files based on job id
+    
+    output_path = f'output/loss_{id}.pdf'
+    plt.savefig(output_path)
+    # plt.savefig('output/loss.pdf')
+
+
+    # plot the visualization of latent space on validation set
 
 
 if __name__ == '__main__':
@@ -189,6 +260,9 @@ if __name__ == '__main__':
     parser.add_argument('--sample-size', type=int, default=-1)
     parser.add_argument('--mix-in-anomalies', action='store_true')
     parser.add_argument('--train', action='store_true')
+
+    parser.add_argument('--visualize', type=bool, default=False)
+    parser.add_argument('--visualized_plots', type=str)
 
     args = parser.parse_args()
     main(args)

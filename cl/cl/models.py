@@ -11,31 +11,43 @@ class CVAE(torch.nn.Module):
     Creates fully supervised CVAE Class
     Training architecture: input -> latent space μ representation -> Proj(μ) -> contrastive loss
     '''
-    def __init__(self, latent_dim=6, layer_size_projection=16, **kwargs):
+    def __init__(self, latent_dim=6, batchnorm=False, dropout=False, layer_size_projection=16, **kwargs):
         super().__init__(**kwargs)
 
+        self.batchnorm = batchnorm
+        self.dropout = dropout
+        self.latent_dim = latent_dim
+        self.layer_size_projection = layer_size_projection
+
         self.mlp = nn.Sequential(
-            nn.Linear(57, 32),
-            nn.BatchNorm1d(32),
+            nn.Linear(57, 128),
+            nn.BatchNorm1d(128),
             nn.LeakyReLU(),
-            nn.Linear(32, 64),
+            nn.Dropout(0.2),
+
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(),
+            nn.Dropout(0.2),
+
+            nn.Linear(64, 64),
             nn.BatchNorm1d(64),
             nn.LeakyReLU()
         )
 
-        self.z_mean = nn.Linear(64, latent_dim)
-        self.z_log_var = nn.Linear(64, latent_dim)
+        self.z_mean = nn.Linear(64, self.latent_dim)
+        self.z_log_var = nn.Linear(64, self.latent_dim)
 
         self.proj_head = nn.Sequential(
-            nn.Linear(latent_dim, layer_size_projection),
+            nn.Linear(self.latent_dim, self.layer_size_projection),
             nn.LeakyReLU(),
-            nn.Linear(layer_size_projection, latent_dim)
+            nn.Linear(self.layer_size_projection, self.latent_dim)
         )
 
 
     def reparameterize(self, mu, logvar):
         """
-        Will a single z be enough ti compute the expectation
+        Will a single z be enough to compute the expectation
         for the loss??
         :param mu: (Tensor) Mean of the latent Gaussian
         :param logvar: (Tensor) Standard deviation of the latent Gaussian
@@ -72,11 +84,12 @@ class SimpleDense(torch.nn.Module):
             nn.Linear(57,52),
             nn.BatchNorm1d(52),
             nn.LeakyReLU(),
-            #nn.Dropout(p=0.2),                       #Try with dropout for VICReg
+            # nn.Dropout(p=0.2),                       #Try with dropout for VICReg
+
             nn.Linear(52,self.latent_dim),
             nn.BatchNorm1d(self.latent_dim),
             nn.LeakyReLU(),
-            #nn.Dropout(p=0.2),                       #Try with dropout for VICReg
+            # nn.Dropout(p=0.2),                       #Try with dropout for VICReg
 
         )
         self.expander = torch.nn.Sequential(

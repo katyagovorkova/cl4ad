@@ -1,6 +1,7 @@
 import numpy as np
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
+import os
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -69,6 +70,7 @@ def main(args):
                 continue
 
             # embed entire batch with first value of the batch repeated
+            
             #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
             embedded_values_orig = model(augmentations.gaussian_resampling_pT(val,device=device, rand_number=0))
@@ -147,6 +149,15 @@ def main(args):
         plt.xlabel('iterations')
         plt.ylabel('Loss')
         plt.legend()
+
+        # save loss as different files based on job id
+
+        id = os.getenv('SLURM_JOB_ID')
+        if id is None:
+            id = 'default'
+        
+        output_path = f'output/loss_{id}.pdf'
+        plt.savefig(output_path)
         plt.savefig('output/loss.pdf')
         
     else:

@@ -11,19 +11,20 @@ from dataset import CLDataset
 
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
+"""
+Creates latenet space embeddings from a saved CVAE model.
+Inputs from terminal
+    background dataset: preprocessed background dataset from create_dataset.py
+    anomaly dataset: preprocessed signal dataset from create_dataset.py
+"""
+
 def main(args):
 
     def create_embedding(features_name, labels_name=None):
-
-
-        dataset = CLBackgroundDataset(args.background_dataset, args.background_ids,
-            preprocess=args.scaling_filename,
-            divisions=[0.30, 0.30, 0.20, 0.20]
-        )
-        dataset.report_specs()
+        dataset = args.background_dataset
 
         train_data_loader = DataLoader(
-            TorchCLDataset(dataset.x_train, dataset.labels_train, device),
+            TorchCLDataset(dataset.x_train, dataset.labels_train, DEVICE),
             batch_size=args.batch_size,
             shuffle=False)
 
@@ -92,6 +93,10 @@ if __name__ == '__main__':
     #Parses terminal command
     parser = ArgumentParser()
     parser.add_argument('dataset_filename', type=str)
+
+    # inputs for preprocessed background and anomaly datasets (ones saved from create_dataset.py)
+    parser.add_argument('background_dataset', type=str)
+    parser.add_argument('anomaly_dataset', type=str)
 
     parser.add_argument('--pretrained-model', type=str)
     parser.add_argument('--output-filename', type=str)
