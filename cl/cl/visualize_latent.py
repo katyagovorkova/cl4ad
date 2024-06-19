@@ -1,12 +1,13 @@
 import os
 import numpy as np
 from argparse import ArgumentParser
+from train import TorchCLDataset
 
 import torch
 from torchsummary import summary
+from torch.utils.data import DataLoader, Dataset
 
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 import umap
 
 import seaborn as sns
@@ -40,8 +41,38 @@ def main(args):
 
     # load the background dataset 
     dataset = np.load(args.background_dataset)
-    data = dataset['x_val']
-    labels = dataset['labels_val']
+
+    # check the proportions of each type of label
+    ix_train = dataset['ix_train']
+    ix_test = dataset['ix_test']
+    ix_val = dataset['ix_val']
+    labels_val = dataset['labels_val'][ix_val]
+    labels_train = dataset['labels_train'][ix_train]
+    labels_test = dataset['labels_test'][ix_test]
+
+    for labels in [labels_train, labels_test, labels_val]:
+        # Get unique labels and their counts
+        unique_labels, counts = np.unique(labels, return_counts=True)
+
+        # Calculate the proportion of each label
+        total_labels = labels.size
+        proportions = counts / total_labels
+
+        # Print the results
+        for label, proportion in zip(unique_labels, proportions):
+            print(f"Label {(int(label))}: {proportion:.2f}")
+        print()
+
+    # load the data
+    val_data_loader = DataLoader(
+        TorchCLDataset(
+            dataset['x_val'],
+            dataset['ix_val'],
+            dataset['ixa_val'],
+            dataset['labels_val'],
+            device),
+        batch_size=512,
+        shuffle=False)
 
     # load the saved model from the input dir path
     model = CVAE().to(device)
@@ -50,12 +81,21 @@ def main(args):
     model.load_state_dict(torch.load(args.saved_model))
     model.eval()
 
-
+    latent_z = []  # holds all the latent representations
+    samples = 0
     # get the latent space representations
-    latent_z = model.representation(data)
+    for idx,(val, val_aug, _) in enumerate(val_data_loader, 1):
+        representation = model.representation(val).cpu().detach().numpy().reshape((-1,6))
+        samples += val.size(0)
+        latent_z.append(representation)
+
+    latent_z = np.concatenate(latent_z, axis=0)
+    print('Number of samples:', samples)
 
 
-    # Pairwise scatter plots
+
+    print('Making plots')
+    # Pairwise scatter plots between latent space dimensions
     # Convert the latent space to a DataFrame
     dsp = pd.DataFrame(latent_z, columns=[f'Dim{i}' for i in range(1, 7)])
     dsp['label'] = labels
@@ -79,22 +119,6 @@ def main(args):
     plt.title('PCA of Latent Space (Validation Data)')
     plt.colorbar(scatter)
     plt.savefig(os.path.join(save_dir, f'pca_plot_{id}.png'))
-    plt.close()
-
-
-    # t-SNE plots
-    # Reduce dimensions to 2 using t-SNE
-    tsne = TSNE(n_components=2)
-    latent_2d_tsne = tsne.fit_transform(latent_z)
-
-    # Plotting the 2D t-SNE result with color coding by label
-    plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(latent_2d_tsne[:, 0], latent_2d_tsne[:, 1], c=labels, cmap='viridis')
-    plt.xlabel('t-SNE Component 1')
-    plt.ylabel('t-SNE Component 2')
-    plt.title('t-SNE of Latent Space (Validation Data)')
-    plt.colorbar(scatter)
-    plt.savefig(os.path.join(save_dir, f'tsne_plot_{id}.png'))
     plt.close()
 
 
