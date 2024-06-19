@@ -54,14 +54,14 @@ def zscore_preprocess(
 
 class CLBackgroundDataset:
     'Characterizes a dataset for PyTorch'
-    def __init__(self, data_filename, labels_filename, preprocess=None, n_events=-1, divisions=[1,1,1,1]):
+    def __init__(self, data_filename, labels_filename, preprocess=None, n_events=-1, divisions=[.25, .25, .25, .25]):
         'Initialization'
         self.data = np.load(data_filename, mmap_mode='r')
         self.labels = np.load(labels_filename, mmap_mode='r')
-        self.n_events = n_events if n_events!=-1 else len( self.data[ next(iter(self.data)) ] )
-        self.scaled_dataset = dict()
-        for k in self.data.keys():
-            if 'x_' in k:
+        self.n_events = n_events if n_events!=-1 else len( self.data[ next(iter(self.data)) ] )  # use specificed number of events, otherwise use all
+        self.scaled_dataset = dict()  # output dataset
+        for k in self.data.keys():  
+            if 'x_' in k:  # get the indices used from x and augmented x for train/test/val
                 self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = \
                     self.division_indicies(self.data[k], self.labels[k.replace('x', 'background_ID')], divisions)
 
@@ -69,26 +69,42 @@ class CLBackgroundDataset:
             self.preprocess(preprocess)
 
     def division_indicies(self, data, labels, divisions):
-            ix = []
-            location_augmented = []
-            for label_category in range(len(divisions)):
+            ix = []  # indices of corresponding samples
+            ixa = []  # indices of corresponding augmented samples
+            # (data, augmented event, label) = x[ix], x[ixa], labels[ix]
+            used = 0  # keep track of how many samples have been filled up already
+            
+            total_sample = 0  
+            for label_category in range(len(divisions)-1, -1, -1):  # iterate in reverse order
 
-                indices = np.where(labels==label_category)[0]
-                label_sample_size = int(divisions[label_category] * labels.shape[0])
+                indices = np.where(labels==label_category)[0]  # indices of labels that == label_category
+                
+                if label_category == len(divisions)-1:  # keep track of allowed total samples by number of tt events
+                    # (all of tt events should make up e.g. 20% of the data)
+                    # COMMENT: TRY WITHOUT USING ALL OF LABEL 3 DATA TO GET BETTER GENERALIZATION
+                    total_sample = int(len(indices) / divisions[label_category])  # take the floor such that label 3 events are strictly enough
+                
+                if label_category != (0):  # if not the first category, simply calculate and round
+                    # calculate number of samples needed as specified by division proportions
+                    label_sample_size = round(divisions[label_category] * total_sample) 
+                    used += label_sample_size
 
-                # If samples available < required -> use replacement
-                replacement = True if len(indices) < label_sample_size else False
+                else:  # if first category, subtract to get the remaining samples
+                    label_sample_size = total_sample - used
 
-                indices = list(np.random.choice(indices, size=label_sample_size, replace=replacement))
+                # sample the indices with/without replacement
+                indices = list(np.random.choice(indices, size=label_sample_size, replace=False))
+                # add sampled indices to ix
                 ix.extend(indices)
 
+                # augmentation is another event with the same label. for simplicity take the next event
                 loc_aug = np.concatenate((indices[1:], indices[0:1]))
-                location_augmented.extend(loc_aug)
+                ixa.extend(loc_aug)
 
-            ix, location_augmented = shuffle(ix, location_augmented, random_state=0)
+            ix, ixa = shuffle(ix, ixa, random_state=0)
 
             # return data[ix], location_augmented, labels[ix].reshape((-1,1))
-            return ix, location_augmented
+            return ix, ixa
 
     def preprocess(self, scaling_filename):
 
@@ -121,14 +137,16 @@ class CLBackgroundDataset:
         in dataset
         '''
         print('File Specs:')
+        print(self.scaled_dataset.keys())
         for k in self.scaled_dataset:
-            if 'label' in k:
-                labels = self.scaled_dataset[k].copy()
+            if 'ix_' in k:
+                labels = self.labels[k.replace('ix_', 'background_ID_')].copy()[self.scaled_dataset[k]]
                 labels = labels.reshape((labels.shape[0],))
                 label_counts = labels.astype(int)
                 label_counts = np.bincount(label_counts)
                 for label, count in enumerate(label_counts):
                     print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
+                    print()
 
 
 class CLSignalDataset:
@@ -213,6 +231,8 @@ if __name__=='__main__':
     )
     background_dataset.report_specs()
     background_dataset.save(args.output_filename)
+
+    print()
 
     # prepare signal datasets
     signal_dataset = CLSignalDataset(
