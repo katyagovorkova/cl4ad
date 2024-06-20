@@ -19,7 +19,7 @@ if id is None:
 
 class TorchCLDataset(Dataset):
     'Characterizes a dataset for PyTorch'
-    def __init__(self, features, ix, ixa, labels, criterion, device):
+    def __init__(self, features, ix, ixa, labels, device, criterion=None):
           'Initialization'
           self.device = device
           self.features = torch.from_numpy(features[ix]).to(dtype=torch.float32, device=self.device)
@@ -38,6 +38,38 @@ class TorchCLDataset(Dataset):
           y = self.labels[index]
 
           return X, X_aug, y
+
+class SignalDataset(Dataset):
+    """ Prepares an anomaly dataset for PyTorch """
+    def __init__(self, data_dict, types, device):
+        """ 
+        assumes data_dict is the dictionary containing data and labels for anomalies
+        types: list of types to include in the dataset, e.g. ['leptoquark', 'ato4l', 'hChToTauNu', 'hToTauTau']
+        """
+        self.data = []
+        self.labels = []
+        self.device = device
+
+        # Iterate over specified types and append data and labels to lists
+        for t in types:
+            data_key = t
+            label_key = f'labels_{t}'
+            labels = data_dict[label_key].copy()
+            # Convert numpy arrays to torch tensors and append to lists
+            self.data.append(torch.from_numpy(data_dict[data_key]).to(dtype=torch.float32, device = self.device))
+            self.labels.append(torch.from_numpy(labels.reshape((labels.shape[0],))).to(dtype=torch.float32, device = self.device))
+        
+        # Concatenate all tensors from list into a single tensor
+        self.data = torch.cat(self.data, dim=0)
+        self.labels = torch.cat(self.labels, dim=0)
+
+    def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        'Generates one sample of data'
+        return self.data[idx], self.labels[idx]
 
 
 def main(args):
@@ -62,7 +94,7 @@ def main(args):
             dataset['ix_train'],
             dataset['ixa_train'],
             dataset['labels_train'],
-            criterion, device),
+            device),
         batch_size=args.batch_size,
         shuffle=False)
 
@@ -71,8 +103,7 @@ def main(args):
             dataset['x_test'],
             dataset['ix_test'],
             dataset['ixa_test'],
-            dataset['labels_test'],
-            criterion, device),
+            device),
         batch_size=args.batch_size,
         shuffle=False)
 
@@ -82,7 +113,7 @@ def main(args):
             dataset['ix_val'],
             dataset['ixa_val'],
             dataset['labels_val'],
-            criterion, device),
+            device),
         batch_size=args.batch_size,
         shuffle=False)
 

@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from argparse import ArgumentParser
-from train import TorchCLDataset
+from train import TorchCLDataset, SignalDataset
 
 import torch
 from torchsummary import summary
@@ -82,16 +82,36 @@ def main(args):
     model.eval()
 
     latent_z = []  # holds all the latent representations
+    labels = []  # corresponding labels for each sample
     samples = 0
+
     # get the latent space representations
-    for idx,(val, val_aug, _) in enumerate(val_data_loader, 1):
+    for idx,(val, val_aug, label) in enumerate(val_data_loader, 1):
         representation = model.representation(val).cpu().detach().numpy().reshape((-1,6))
         samples += val.size(0)
         latent_z.append(representation)
+        labels.append(label.cpu().detach().numpy())
+
+
+    # mix in anomalies
+    mix = args.include_anomaly
+    if mix:
+        anomaly = np.load(args.anomaly_dataset)
+        types = ['leptoquark', 'ato4l', 'hChToTauNu', 'hToTauTau']
+        anomaly_data_loader = DataLoader(SignalDataset(anomaly, types, device), batch_size=512)
+
+        # get latent space representations
+        for idx, (val, label) in enumerate(anomaly_data_loader):
+            representation = model.representation(val).cpu().detach().numpy().reshape((-1,6))
+            samples += val.size(0)
+            latent_z.append(representation)
+            labels.append(label.cpu().detach().numpy())
+
 
     latent_z = np.concatenate(latent_z, axis=0)
+    labels = np.concatenate(labels, axis=0)
     print('Number of samples:', samples)
-
+    print('Number of labesl:', labels.shape)
 
 
     print('Making plots')
@@ -146,6 +166,7 @@ if __name__ == '__main__':
     # inputs for preprocessed background and anomaly datasets (ones saved from create_dataset.py)
     parser.add_argument('background_dataset', type=str)
     parser.add_argument('saved_model', type=str)
+    parser.add_argument('include_anomaly', type=bool)
 
     parser.add_argument('--anomaly-dataset', type=str)
     parser.add_argument('--output-dir', type=str, default='output/visualization_plots')

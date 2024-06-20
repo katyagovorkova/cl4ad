@@ -146,7 +146,6 @@ class CLBackgroundDataset:
                 label_counts = np.bincount(label_counts)
                 for label, count in enumerate(label_counts):
                     print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
-                    print()
 
 
 class CLSignalDataset:
@@ -195,14 +194,18 @@ class CLSignalDataset:
         in dataset
         '''
         print('File Specs:')
+        print(self.scaled_dataset.keys())
+
         for k in self.scaled_dataset:
             if 'label' in k:
                 labels = self.scaled_dataset[k].copy()
+                print('labels:', labels)
                 labels = labels.reshape((labels.shape[0],))
                 label_counts = labels.astype(int)
                 label_counts = np.bincount(label_counts)
-                for label, count in enumerate(label_counts):
-                    print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
+                label = len(label_counts) - 1
+                count = label_counts[-1]
+                print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
 
 
 if __name__=='__main__':
