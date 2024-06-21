@@ -98,14 +98,14 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False)
 
-    test_data_loader = DataLoader(
-        TorchCLDataset(
-            dataset['x_test'],
-            dataset['ix_test'],
-            dataset['ixa_test'],
-            device),
-        batch_size=args.batch_size,
-        shuffle=False)
+    # test_data_loader = DataLoader(
+    #     TorchCLDataset(
+    #         dataset['x_test'],
+    #         dataset['ix_test'],
+    #         dataset['ixa_test'],
+    #         device),
+    #     batch_size=args.batch_size,
+    #     shuffle=False)
 
     val_data_loader = DataLoader(
         TorchCLDataset(
@@ -133,6 +133,7 @@ def main(args):
     # training
     def train_one_epoch(epoch_index):
         running_sim_loss = 0.
+        count = 0.
         last_sim_loss = 0.
 
         for idx, (val, val_aug, _) in enumerate(train_data_loader, 1):
@@ -151,16 +152,19 @@ def main(args):
             optimizer.step()
             # Gather data and report
             running_sim_loss += similar_embedding_loss.item()
-            if idx % 500 == 0:
-                last_sim_loss = running_sim_loss / 500
-                running_sim_loss = 0.
+            count += 1
+            # if idx % 50 == 0:
+            #     last_sim_loss = running_sim_loss / 50
+            #     running_sim_loss = 0.
 
-        return last_sim_loss
+        # return last_sim_loss
+        return running_sim_loss/count
 
 
     # validation 
     def val_one_epoch(epoch_index):
         running_sim_loss = 0.
+        count = 0.
         last_sim_loss = 0.
 
         for idx,(val, val_aug, _) in enumerate(val_data_loader, 1):
@@ -175,11 +179,13 @@ def main(args):
                 embedded_values_orig.reshape((-1,6)))
 
             running_sim_loss += similar_embedding_loss.item()
-            if idx % 500 == 0:
-                last_sim_loss = running_sim_loss / 500
-                running_sim_loss = 0.
+            count += 1
+            # if idx % 50 == 0:
+            #     last_sim_loss = running_sim_loss / 50
+            #     running_sim_loss = 0.
 
-        return last_sim_loss
+        # return last_sim_loss
+        return running_sim_loss/count
     
     # early stopping
     class EarlyStopping:
@@ -214,9 +220,8 @@ def main(args):
                 if self.epochs_no_improve >= self.patience:
                     self.should_stop = True
 
-    early_stopping = EarlyStopping(save_path=args.model_name, patience=10, verbose=True)
-
     if args.train:
+        # early_stopping = EarlyStopping(save_path=f'{args.model_dir}vae_{id}.pth', patience=10, verbose=True)
         train_losses = []
         val_losses = []
         for epoch in range(1, args.epochs+1):
@@ -236,14 +241,14 @@ def main(args):
 
             scheduler.step()
 
-            early_stopping.check(avg_val_loss, model)
-            if early_stopping.should_stop:
-                print(f"Stopping early at epoch {epoch}")
-                break
+            # early_stopping.check(avg_val_loss, model)
+            # if early_stopping.should_stop:
+            #     print(f"Stopping early at epoch {epoch}")
+            #     break
 
-        torch.save(model.state_dict(), f'output/vae_{id}.pth')
+        torch.save(model.state_dict(), f'{args.model_dir}vae_{id}.pth')
     else:
-        model.load_state_dict(torch.load(args.model_name))
+        model.load_state_dict(torch.load(args.model_dir))
         model.eval()
 
 
@@ -266,7 +271,7 @@ def main(args):
 
     # save loss as different files based on job id
     
-    output_path = f'output/loss_{id}.pdf'
+    output_path = f'{args.loss_dir}loss_{id}.pdf'
     plt.savefig(output_path)
     # plt.savefig('output/loss.pdf')
 
@@ -285,9 +290,10 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--loss-temp', type=float, default=0.07)
-    parser.add_argument('--model-name', type=str, default='output/vae.pth')
+    parser.add_argument('--model-dir', type=str, default='output/vae.pth')
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--output-filename', type=str, default='output/embedding.npz')
+    parser.add_argument('--loss_dir', type=str, default='output/')
     parser.add_argument('--sample-size', type=int, default=-1)
     parser.add_argument('--mix-in-anomalies', action='store_true')
     parser.add_argument('--train', action='store_true')
