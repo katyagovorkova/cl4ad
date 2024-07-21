@@ -24,7 +24,7 @@ class TorchCLDataset(Dataset):
           self.device = device
           self.features = torch.from_numpy(features[ix]).to(dtype=torch.float32, device=self.device)
           self.augmentations = torch.from_numpy(features[ixa].copy()).to(dtype=torch.float32, device=self.device)
-          self.labels = torch.from_numpy(labels[ix]).to(dtype=torch.float32, device=self.device)
+          self.labels = torch.from_numpy(labels[ix]).to(dtype=torch.long, device=self.device)
 
     def __len__(self):
           'Denotes the total number of samples'
@@ -80,6 +80,8 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
 
+    print(args.notes)
+
     # background dataset
     dataset = np.load(args.background_dataset)
     visualize = args.visualize
@@ -117,7 +119,8 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False)
 
-    model = CVAE().to(device)
+    latent_dim = args.latent_dim
+    model = CVAE(latent_dim=latent_dim).to(device)
     summary(model, input_size=(57,))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -144,8 +147,8 @@ def main(args):
             embedded_values_orig = model(val)
             embedded_values_aug = model(val_aug)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), \
-                embedded_values_orig.reshape((-1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,latent_dim)), \
+                embedded_values_orig.reshape((-1,latent_dim)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -168,15 +171,14 @@ def main(args):
         last_sim_loss = 0.
 
         for idx,(val, val_aug, _) in enumerate(val_data_loader, 1):
-
             if val.shape[0] != args.batch_size:
                 continue
 
             embedded_values_orig = model(val)
             embedded_values_aug = model(val_aug)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), \
-                embedded_values_orig.reshape((-1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,latent_dim)), \
+                embedded_values_orig.reshape((-1,latent_dim)))
 
             running_sim_loss += similar_embedding_loss.item()
             count += 1
@@ -287,6 +289,7 @@ if __name__ == '__main__':
     parser.add_argument('background_dataset', type=str)
     parser.add_argument('anomaly_dataset', type=str)
 
+    parser.add_argument('--latent-dim', type=int, default=6)
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--loss-temp', type=float, default=0.07)
@@ -300,6 +303,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--visualize', type=bool, default=False)
     parser.add_argument('--visualized_plots', type=str)
+
+    parser.add_argument('--notes', type=str)
 
     args = parser.parse_args()
     main(args)

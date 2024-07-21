@@ -23,7 +23,8 @@ TRAIN_TEST_VAL_MAP = {
 def zscore_preprocess(
         input_array,
         train=False,
-        scaling_file=None
+        scaling_file=None, 
+        for_transformer=False
         ):
     '''
     Normalizes using zscore scaling along pT only ->  x' = (x - μ) / σ
@@ -49,6 +50,9 @@ def zscore_preprocess(
 
     # Outputs normalized pT while preserving original values for eta and phi
     outputs = np.concatenate([normalized_tensor[:,:,0,:], input_array[:,:,1,:], input_array[:,:,2,:]], axis=2)
+
+    if for_transformer:
+        return np.reshape(outputs * mask, (-1, 19, 3))
     return np.reshape(outputs * mask, (-1, 57))
 
 
@@ -67,6 +71,11 @@ class CLBackgroundDataset:
 
         if preprocess:
             self.preprocess(preprocess)
+        else:
+            self.scaled_dataset['x_train'] = self.data['x_train']
+            self.scaled_dataset['x_test'] = self.data['x_test']
+            self.scaled_dataset['x_val'] = self.data['x_val']
+
 
     def division_indicies(self, data, labels, divisions):
             ix = []  # indices of corresponding samples
@@ -107,11 +116,11 @@ class CLBackgroundDataset:
             return ix, ixa
 
     def preprocess(self, scaling_filename):
-
+        tf = True if args.for_transformer else False
         # Normalizes train and testing features by x' = (x - μ) / σ, where μ, σ are predetermined constants
-        self.scaled_dataset['x_train'] = zscore_preprocess(self.data['x_train'], train=True, scaling_file=scaling_filename)
-        self.scaled_dataset['x_test'] = zscore_preprocess(self.data['x_test'], scaling_file=scaling_filename)
-        self.scaled_dataset['x_val'] = zscore_preprocess(self.data['x_val'], scaling_file=scaling_filename)
+        self.scaled_dataset['x_train'] = zscore_preprocess(self.data['x_train'], train=True, scaling_file=scaling_filename, for_transformer=tf)
+        self.scaled_dataset['x_test'] = zscore_preprocess(self.data['x_test'], scaling_file=scaling_filename, for_transformer=tf)
+        self.scaled_dataset['x_val'] = zscore_preprocess(self.data['x_val'], scaling_file=scaling_filename, for_transformer=tf)
 
     def save(self, filename):
 
@@ -179,8 +188,9 @@ class CLSignalDataset:
 
     def preprocess(self, data, scaling_filename):
         # Normalizes train and testing features by x' = (x - μ) / σ, where μ, σ are predetermined constants
+        tf = True if args.for_transformer else False
         for k in data.keys():
-            if not 'label' in k: data[k] = zscore_preprocess(data[k], scaling_file=scaling_filename)
+            if not 'label' in k: data[k] = zscore_preprocess(data[k], scaling_file=scaling_filename, for_transformer=tf)
 
         return data
 
@@ -218,11 +228,13 @@ if __name__=='__main__':
     parser.add_argument('background_ids', type=str)
     parser.add_argument('anomaly_dataset', type=str)
 
-    parser.add_argument('--scaling-filename', type=str)
+    parser.add_argument('--scaling-filename', type=str, default=None)
     parser.add_argument('--output-filename', type=str, default=None)
     parser.add_argument('--output-anomaly-filename', type=str, default=None)
     parser.add_argument('--sample-size', type=int, default=-1)
     parser.add_argument('--mix-in-anomalies', action='store_true')
+
+    parser.add_argument('--for-transformer', type=str, default=None)
 
     args = parser.parse_args()
 
@@ -233,7 +245,10 @@ if __name__=='__main__':
         divisions=[0.30, 0.30, 0.20, 0.20],
     )
     background_dataset.report_specs()
-    background_dataset.save(args.output_filename)
+    if args.for_transformer:
+        background_dataset.save(f'{args.output_filename}_tf')
+    else:
+        background_dataset.save(args.output_filename)
 
     print()
 
@@ -243,5 +258,8 @@ if __name__=='__main__':
         preprocess=args.scaling_filename
     )
     signal_dataset.report_specs()
-    signal_dataset.save(args.output_anomaly_filename)
+    if args.for_transformer:
+        signal_dataset.save(f'{args.output_anomaly_filename}_tf')
+    else:
+        signal_dataset.save(args.output_anomaly_filename)
 
