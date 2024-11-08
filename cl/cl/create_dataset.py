@@ -58,16 +58,22 @@ def zscore_preprocess(
 
 class CLBackgroundDataset:
     'Characterizes a dataset for PyTorch'
-    def __init__(self, data_filename, labels_filename, preprocess=None, n_events=-1, divisions=[.25, .25, .25, .25]):
+    def __init__(self, data_filename, labels_filename, preprocess=None, n_events=-1, \
+                 divisions=[.25, .25, .25, .25], quakstyle=0, signal_data=None, signal_labels=None):
         'Initialization'
         self.data = np.load(data_filename, mmap_mode='r')
         self.labels = np.load(labels_filename, mmap_mode='r')
         self.n_events = n_events if n_events!=-1 else len( self.data[ next(iter(self.data)) ] )  # use specificed number of events, otherwise use all
         self.scaled_dataset = dict()  # output dataset
+        self.quakstyle = quakstyle
         for k in self.data.keys():  
             if 'x_' in k:  # get the indices used from x and augmented x for train/test/val
-                self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = \
-                    self.division_indicies(self.data[k], self.labels[k.replace('x', 'background_ID')], divisions)
+                ix, ixs = self.division_indicies(self.labels[k.replace('x', 'background_ID')], divisions, quakstyle)
+                ixa = self.get_ixa(ixs)
+                ix, ixa = shuffle(ix, ixa, random_state=0)
+                self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = ix, ixa
+                # self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = \
+                #     self.division_indicies(self.data[k], self.labels[k.replace('x', 'background_ID')], divisions)
 
         if preprocess:
             self.preprocess(preprocess)
@@ -77,9 +83,22 @@ class CLBackgroundDataset:
             self.scaled_dataset['x_val'] = self.data['x_val']
 
 
-    def division_indicies(self, data, labels, divisions):
+    def get_ixa(self, ixs):
+        """
+        returns ixa for a list of ix's
+        """
+        ixa = []
+        for ix in ixs:
+            ixa.extend(np.concatenate((ix[1:], ix[0:1])))
+        return ixa
+
+    def division_indicies(self, labels, divisions, quakstyle=0):
+            """
+            returns a balanced ix & ixs for ixa
+            """
             ix = []  # indices of corresponding samples
-            ixa = []  # indices of corresponding augmented samples
+            ixs = []  # used to get ixa's
+            # ixa = []  # indices of corresponding augmented samples
             # (data, augmented event, label) = x[ix], x[ixa], labels[ix]
             used = 0  # keep track of how many samples have been filled up already
             
@@ -87,33 +106,31 @@ class CLBackgroundDataset:
             for label_category in range(len(divisions)-1, -1, -1):  # iterate in reverse order
 
                 indices = np.where(labels==label_category)[0]  # indices of labels that == label_category
-                
-                if label_category == len(divisions)-1:  # keep track of allowed total samples by number of tt events
-                    # (all of tt events should make up e.g. 20% of the data)
-                    # COMMENT: TRY WITHOUT USING ALL OF LABEL 3 DATA TO GET BETTER GENERALIZATION
-                    total_sample = int(len(indices) / divisions[label_category])  # take the floor such that label 3 events are strictly enough
-                
-                if label_category != (0):  # if not the first category, simply calculate and round
-                    # calculate number of samples needed as specified by division proportions
-                    label_sample_size = round(divisions[label_category] * total_sample) 
-                    used += label_sample_size
 
-                else:  # if first category, subtract to get the remaining samples
-                    label_sample_size = total_sample - used
+                # if need to balance dataset
+                if divisions != [1,1,1,1]:  # divisions=[1,1,1,1] when using original, unbalanced dataset
 
-                # sample the indices with/without replacement
-                indices = list(np.random.choice(indices, size=label_sample_size, replace=False))
+                    if label_category == len(divisions)-1:  # keep track of allowed total samples by number of tt events
+                        # (all of tt events should make up e.g. 20% of the data)
+                        # COMMENT: TRY WITHOUT USING ALL OF LABEL 3 DATA TO GET BETTER GENERALIZATION
+                        total_sample = int(len(indices) / divisions[label_category])  # take the floor such that label 3 events are strictly enough
+                    
+                    if label_category != (0):  # if not the first category, simply calculate and round
+                        # calculate number of samples needed as specified by division proportions
+                        label_sample_size = round(divisions[label_category] * total_sample) 
+                        used += label_sample_size
+
+                    else:  # if first category, subtract to get the remaining samples
+                        label_sample_size = total_sample - used
+
+                    # sample the indices with/without replacement
+                    indices = list(np.random.choice(indices, size=label_sample_size, replace=False))
                 # add sampled indices to ix
                 ix.extend(indices)
+                ixs.append(indices)
+            
 
-                # augmentation is another event with the same label. for simplicity take the next event
-                loc_aug = np.concatenate((indices[1:], indices[0:1]))
-                ixa.extend(loc_aug)
-
-            ix, ixa = shuffle(ix, ixa, random_state=0)
-
-            # return data[ix], location_augmented, labels[ix].reshape((-1,1))
-            return ix, ixa
+            return ix, ixs
 
     def preprocess(self, scaling_filename):
         tf = True if args.for_transformer else False
@@ -172,6 +189,11 @@ class CLSignalDataset:
         if preprocess:
             self.scaled_dataset = self.preprocess(self.scaled_dataset, preprocess)
 
+    def get_signal(self, signal):  # signal = 4,5,6,7
+        anomaly = NAME_MAPPINGS[signal]
+        signal_data, signal_labels = self.scaled_dataset[anomaly], self.scaled_dataset[f"labels_{anomaly}"]
+        return signal_data, signal_labels
+
     def create_labels(self):
         labels = dict()
 
@@ -227,6 +249,8 @@ if __name__=='__main__':
     parser.add_argument('background_dataset', type=str)
     parser.add_argument('background_ids', type=str)
     parser.add_argument('anomaly_dataset', type=str)
+    parser.add_argument('--quakstyle', type=int, default=0) # 0: no quakstyle, 4-7: train with corresponding signal
+    parser.add_argument('--injection_rate', type=float, default=0.)  # percent of data that is signal
 
     parser.add_argument('--scaling-filename', type=str, default=None)
     parser.add_argument('--output-filename', type=str, default=None)
@@ -235,6 +259,7 @@ if __name__=='__main__':
     parser.add_argument('--mix-in-anomalies', action='store_true')
 
     parser.add_argument('--for-transformer', type=str, default=None)
+    parser.add_argument('--divisions', type=list, default=[1,1,1,1])  # [1,1,1,1] = unbalanced
 
     args = parser.parse_args()
 
@@ -242,7 +267,7 @@ if __name__=='__main__':
     background_dataset = CLBackgroundDataset(
         args.background_dataset, args.background_ids,
         preprocess=args.scaling_filename,
-        divisions=[0.30, 0.30, 0.20, 0.20],
+        divisions=args.divisions,
     )
     background_dataset.report_specs()
     if args.for_transformer:

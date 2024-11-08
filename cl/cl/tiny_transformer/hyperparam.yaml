@@ -1,0 +1,45 @@
+program: /n/home12/ylanaxu/orca/cl-orca/cl/cl/tiny_transformer/train.py
+name: hyperparam sweep
+method: bayes
+metric:
+  goal: maximize
+  name: val f1
+parameters:
+  data-filename:
+    value: "/n/holystore01/LABS/iaifi_lab/Lab/CLorca/CLORCA_data/datasets_-1.npz"
+  labels-filename: 
+    value: "/n/holystore01/LABS/iaifi_lab/Lab/CLorca/CLORCA_data/background_IDs_-1.npz"
+  background-dataset: 
+    value: "/n/home12/ylanaxu/orca/output/transformer/background_dataset.npz"
+  model-dir:
+    value: "output/transformer/"
+  loss_dir:
+    value: "output/transformer/"
+  proportioned:
+    value: "true" 
+  optimizer:
+    value: "adamw"
+  lr:
+    min: 0.001
+    max: 0.1
+  wd:
+    min: 0.001
+    max: 0.1
+  batch-size:
+    values: [32,64,128]
+  epochs:
+    value: 100
+  heads:
+    value: 4
+  latent-dim:
+    value: 4
+  layers:
+    value: 2
+  expansion:
+    value: 2
+  dropout:
+    value: 0.1
+command:
+  - python3
+  - ${program}
+  - ${args}

@@ -1,0 +1,52 @@
+program: /n/home12/ylanaxu/orca/cl-orca/cl/cl/tiny_transformer/train.py
+name: simclr alpha
+method: bayes
+metric:
+  goal: maximize
+  name: val acc
+parameters:
+  data-filename:
+    value: "/n/holystore01/LABS/iaifi_lab/Lab/CLorca/CLORCA_data/datasets_-1.npz"
+  labels-filename: 
+    value: "/n/holystore01/LABS/iaifi_lab/Lab/CLorca/CLORCA_data/background_IDs_-1.npz"
+  background-dataset: 
+    value: "/n/home12/ylanaxu/orca/output/transformer/background_dataset.npz"
+  model-dir:
+    value: "output/transformer/"
+  loss_dir:
+    value: "output/transformer/"
+  proportioned:
+    value: "true" 
+  vicreg:
+    value: "false"
+  simclr:
+    value: "true"
+  optimizer:
+    value: "adamw"
+  lr:
+    value: 0.001
+  wd:
+    value: 0.01
+  batch-size:
+    value: 1024
+  epochs:
+    value: 60
+  heads:
+    value: 8 
+  latent-dim:
+    value: 16
+  layers:
+    value: 4
+  expansion:
+    value: 16
+  dropout:
+    value: 0.1
+  alpha:
+    max: 0.99
+    min: 0.01
+  notes:
+    value: "testing for alpha, bigger batch size for efficiency"
+command:
+  - python3
+  - ${program}
+  - ${args}
