@@ -21,7 +21,7 @@ class BackgroundDataset(Dataset):
           self.data = torch.from_numpy(x[ix]).to(dtype=torch.float32, device=self.device)
           self.labels = torch.from_numpy(labels[ix]).to(dtype=torch.long, device=self.device)
           # if augmentation, prepare augmented outputs for vicreg loss
-          ixa = np.concatenate((ix[1:], ix[0:1]))
+        #   ixa = np.concatenate((ix[1:], ix[0:1]))
           self.augmented_data = torch.from_numpy(x[ixa]).to(dtype=torch.float32, device=self.device) if augmentation else None
 
     def __len__(self):
