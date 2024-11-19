@@ -1,6 +1,7 @@
 import numpy as np
 from argparse import ArgumentParser
 import os
+import re
 
 import torch
 from torch.utils.data import DataLoader, Dataset, TensorDataset
@@ -21,7 +22,6 @@ class BackgroundDataset(Dataset):
           self.data = torch.from_numpy(x[ix]).to(dtype=torch.float32, device=self.device)
           self.labels = torch.from_numpy(labels[ix]).to(dtype=torch.long, device=self.device)
           # if augmentation, prepare augmented outputs for vicreg loss
-        #   ixa = np.concatenate((ix[1:], ix[0:1]))
           self.augmented_data = torch.from_numpy(x[ixa]).to(dtype=torch.float32, device=self.device) if augmentation else None
 
     def __len__(self):
@@ -72,102 +72,131 @@ class SignalDataset(Dataset):
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
-
     print(args.notes)
-    print(args.latent_dim)
-    print(args.model_dir)
 
     torch.manual_seed(0)
     np.random.seed(0)
 
-    # Parameters
-    input_dim = 3  # Each step has 3 features
-    num_heads = args.heads  # Number of heads in the multi-head attention mechanism
-    num_classes = 4  # You have four classes
-    num_layers = args.layers  # Number of transformer blocks
-    latent_dim = args.latent_dim
-    forward_expansion = args.expansion
-    dropout_rate = args.dropout
-    save_embed = True if args.save_embed == "true" else False
-
-    model = TransformerModel(input_dim, num_heads, num_classes, latent_dim, num_layers, forward_expansion, dropout_rate).to(device)
-    model.load_state_dict(torch.load(f"output/transformer/transformer_{args.model_dir}.pth"))
-
     dataset = np.load(args.background_dataset)
-    test_data_loader = DataLoader(
-        BackgroundDataset(
-            dataset['x_test'],
-            dataset['ix_test'],
-            dataset['labels_test'],
-            device,
-            ),
-        batch_size=args.batch_size,
-        shuffle=False,
-        drop_last=True,
-        )
 
-    instances = []
-    embeds = []
-    preds = []
-    labels = []
+    model_prefix = args.model_dir
+    suffix = args.model_names.split(',')
+    model_suffix = []
+    for name in suffix:
+        prefix, identifier = name.rsplit('_', 1)
+        for fold in range(5):  # Folds 0 to 4 inclusive
+            # Add fold information before the identifier
+            model_suffix.append(f"{prefix}_fold{fold}_{identifier}.pth")
+    print(model_suffix)
 
-    for data, label in test_data_loader:
-        with torch.no_grad():
-            inputs = data.squeeze(-1)
-            outputs = model(inputs)
-            _, pred = torch.max(outputs, 1)
+    for suffix in model_suffix:
+        pattern = r"dim(\d+)_head(\d+)_fold(\d+)"
+        match = re.search(pattern, suffix)
+        if match is None: raise ValueError("dim & head not found")
+        vicreg = suffix[:6] == "vicreg"
+        loss_name = "vicreg" if vicreg else "simclr"
+        dataset_part = args.dataset_part  # test or train or val
 
-            instances.append(inputs.to(device).tolist())
-            embeds.append(outputs.to(device).tolist())
-            preds.extend(pred.to(device).tolist())
-            labels.extend(label.to(device).tolist())
+        dim = int(match.group(1)) 
+        heads = int(match.group(2))  
+        fold = int(match.group(3))
+        layers = 4
+        expansion = 16
+        print(f"dim: {dim}, head: {heads}, fold: {fold}")
 
-    correct_predictions = sum([1 for pred, true in zip(preds, labels) if pred == true])
-    accuracy = correct_predictions / len(preds)
+        model = TransformerModel(3, heads, 4, dim, layers, expansion, dropout_rate=0.1, embedding_only=True).to(device)
+        model.load_state_dict(torch.load(model_prefix + suffix))
+        model.eval()
+        for param in model.parameters():
+            param.requires_grad = False
 
-    instances = np.array(instances)
-    embeds = np.array(embeds)
-    preds = np.array(preds)
-    labels = np.array(labels)
+        data_loader = DataLoader(
+                    BackgroundDataset(
+                        dataset[f'x_{dataset_part}'],
+                        dataset[f'ix_{dataset_part}'],
+                        dataset[f'labels_{dataset_part}'],
+                        device=device,
+                        augmentation=vicreg,
+                        ixa=dataset[f'ixa_{dataset_part}'],),
+                    batch_size=args.batch_size,
+                    shuffle=False,
+                    drop_last=True)
 
-    preds_dir = args.preds_dir
-    if preds_dir is not None:
-        with np.load(preds_dir) as data:
-            data_dict = {key: data[key] for key in data.keys()}
-        
-        data_dict[f'dim{latent_dim}_embeddings'] = embeds
-        data_dict[f'dim{latent_dim}_predictions'] = preds
-        data_dict[f'dim{latent_dim}_labels'] = labels
-        data_dict[f'dim{latent_dim}_accuracy'] = accuracy
-        np.savez(preds_dir, **data_dict)
+        instances = []
+        embeds = []
+        preds = []
+        labels = []
 
-    else:
-        preds_dir = f"vicreg_predictions.npz"
-        data_dict = {'instances': instances, f'dim{latent_dim}_embeddings': embeds, f'dim{latent_dim}_predictions': preds, \
-                      f'dim{latent_dim}_labels': labels, f'dim{latent_dim}_accuracy': accuracy}
-        np.savez(preds_dir, **data_dict)
+        if vicreg:
+            for x, _, label in data_loader:  #_ is augmented value
+                with torch.no_grad():
+                    x = x.squeeze(-1)
+                    outputs = model(x)
+                    _, pred = torch.max(outputs, 1)
+
+                    instances.append(x.to(device).tolist())
+                    embeds.append(outputs.to(device).tolist())
+                    preds.extend(pred.to(device).tolist())
+                    labels.extend(label.to(device).tolist())
+        else:
+            for x, label in data_loader:
+                with torch.no_grad():
+                    x = x.squeeze(-1)
+                    outputs = model(x)
+                    _, pred = torch.max(outputs, 1)
+
+                    instances.append(x.to(device).tolist())
+                    embeds.append(outputs.to(device).tolist())
+                    preds.extend(pred.to(device).tolist())
+                    labels.extend(label.to(device).tolist())
+
+        correct_predictions = sum([1 for pred, true in zip(preds, labels) if pred == true])
+        accuracy = correct_predictions / len(preds)
+
+        instances = np.array(instances)
+        embeds = np.array(embeds)
+        preds = np.array(preds)
+        labels = np.array(labels)
+
+        preds_dir = args.preds_dir
+        if preds_dir is not None:
+            with np.load(preds_dir) as data:
+                data_dict = {key: data[key] for key in data.keys()}
+            
+            data_dict[f'dim{dim}_embeddings'] = embeds
+            data_dict[f'dim{dim}_predictions'] = preds
+            data_dict[f'dim{dim}_labels'] = labels
+            data_dict[f'dim{dim}_accuracy'] = accuracy
+            np.savez(preds_dir, **data_dict)
+
+        else:
+            preds_dir = f"{loss_name}_predictions.npz"
+            data_dict = {'instances': instances, f'dim{dim}_embeddings': embeds, f'dim{latent_dim}_predictions': preds, \
+                        f'dim{dim}_labels': labels, f'dim{dim}_accuracy': accuracy}
+            np.savez(preds_dir, **data_dict)
 
 
 if __name__ == '__main__':
     # Parses terminal command
     parser = ArgumentParser()
 
-    parser.add_argument('--data-filename', type=str, default=None)
-    parser.add_argument('--labels-filename', type=str, default=None)
     parser.add_argument('--background-dataset', type=str, default=None)
+    parser.add_argument('--dataset-part', type=str, default=None)
+        # e.g. test
     parser.add_argument('--kfold-dataset', type=str, default=None)
-    parser.add_argument('--anomaly-dataset', type=str)
 
     parser.add_argument('--latent-dim', type=int, default=3)
     parser.add_argument('--heads', type=int, default=3)
-    parser.add_argument('--layers', type=int, default=1)
-    parser.add_argument('--expansion', type=int, default=4)
-    parser.add_argument('--dropout', type=float, default=0.1)
+    # parser.add_argument('--layers', type=int, default=1)
+    # parser.add_argument('--expansion', type=int, default=4)
+    # parser.add_argument('--dropout', type=float, default=0.1)
 
-    parser.add_argument('--batch-size', type=int, default=256)
-    parser.add_argument('--model-dir', type=int)
+    parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--preds-dir', type=str, default=None)
-    parser.add_argument('--save-embed', type=str, default="true")
+    parser.add_argument('--model-dir', type=str, default=None)
+        # e.g. /n/home12/ylanaxu/orca/output/kfold_exp/
+    parser.add_argument('--model-names', type=str, default=None)
+        # e.g. vicreg_dim2_head2_56194334,vicreg_dim4_head4_56194342,vicreg_dim8_head4_56194352,vicreg_dim16_head8_56194369,vicreg_dim24_head8_56194372,vicreg_dim32_head16_56194387
 
     parser.add_argument('--notes', type=str)
 

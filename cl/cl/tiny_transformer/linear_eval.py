@@ -127,21 +127,7 @@ def main(args):
             "expansion": expansion,
             "loss": loss_name,
         }
-        ) as run:
-            # # Use dim and heads as the identifier for grouping in wandb
-            # wandb.run.name = f"dim{dim}_head{heads}_fold{fold}_{id}"
-            # wandb.run.group = f"dim{dim}_head{heads}"  # Group by dim and heads
-            # wandb.run.tags = [f"dim{dim}", f"head{heads}", f"fold{fold}"]
-
-            # # Log some initial information
-            # wandb.config.update({
-            #     "dim": dim,
-            #     "heads": heads,
-            #     "fold": fold,
-            #     "layers": layers,
-            #     "expansion": expansion,
-            #     "loss": loss_name,
-            # })
+        ):
 
             tf = TransformerModel(3, heads, 4, dim, layers, expansion, dropout_rate=0.1, embedding_only=True).to(device)
             tf.load_state_dict(torch.load(model_prefix + suffix))
@@ -190,22 +176,33 @@ def main(args):
             val_losses = []
 
             def train_epoch(combined_model, data_loader):
-                #TODO: incorporate for simcl
                 combined_model.train()
                 loss_sum = 0.
                 count = 0
-                for x, _, label in data_loader:  #_ is augmented value
-                    
-                    x = x.squeeze(-1)
-                    outputs = combined_model(x)
-                    loss = criterion(outputs, label)
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    
-                    loss_sum += loss.item()
-                    count += 1
-                return loss_sum/count 
+                if vicreg:
+                    for x, _, label in data_loader:  #_ is augmented value
+                        x = x.squeeze(-1)
+                        outputs = combined_model(x)
+                        loss = criterion(outputs, label)
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()
+                        
+                        loss_sum += loss.item()
+                        count += 1
+                    return loss_sum/count 
+                else: #simclr
+                    for x, label in data_loader:
+                        x = x.squeeze(-1)
+                        outputs = combined_model(x)
+                        loss = criterion(outputs, label)
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()
+                        
+                        loss_sum += loss.item()
+                        count += 1
+                    return loss_sum/count 
 
             def val_epoch(combined_model, data_loader):
                 combined_model.eval()

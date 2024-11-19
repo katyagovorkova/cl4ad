@@ -14,7 +14,11 @@ def mean_with_uncertainty(input):
 
 
 def main():
-    input = [76.0497291, 74.91534443, 79.47223297, 76.14164087, 73.58504257]
+    input = [80.28492647,79.73829334,80.29943885,79.91244195,79.94388545]
     mean_with_uncertainty(input)
 if __name__=='__main__':
     main()
+    embedding = np.array([2,4,8,16,24,32])
+    accuracy = np.array([29.9946,76.0328,79.2836,79.866,79.6783,80.0358])
+    error=np.array([0,0.9768,0.2252,0.0904,0.2331,0.1104])
+    np.savez("vicreg_acc_error.npz", embedding=embedding, accuracy=accuracy, error=error)
