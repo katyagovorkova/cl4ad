@@ -78,6 +78,31 @@ def main(args):
     np.random.seed(0)
 
     dataset = np.load(args.background_dataset)
+    dataset_part = args.dataset_part  # test or train or val
+    signal_dataset = np.load(args.anomaly_dataset)
+
+    data_loader = DataLoader(
+                    BackgroundDataset(
+                        dataset[f'x_{dataset_part}'],
+                        dataset[f'ix_{dataset_part}'],
+                        dataset[f'labels_{dataset_part}'],
+                        device=device,
+                        augmentation=True, # change to simclr when needed
+                        ixa=dataset[f'ixa_{dataset_part}'],),
+                    batch_size=args.batch_size,
+                    shuffle=False,
+                    drop_last=True)
+        
+    signal_data_loader = DataLoader(
+        SignalDataset(
+            signal_dataset,
+            ['leptoquark', 'ato4l', 'hChToTauNu', 'hToTauTau'],
+            device=device
+        ),
+        batch_size=args.batch_size,
+        shuffle=False,
+        drop_last=True
+    )
 
     model_prefix = args.model_dir
     suffix = args.model_names.split(',')
@@ -95,7 +120,6 @@ def main(args):
         if match is None: raise ValueError("dim & head not found")
         vicreg = suffix[:6] == "vicreg"
         loss_name = "vicreg" if vicreg else "simclr"
-        dataset_part = args.dataset_part  # test or train or val
 
         dim = int(match.group(1)) 
         heads = int(match.group(2))  
@@ -110,22 +134,10 @@ def main(args):
         for param in model.parameters():
             param.requires_grad = False
 
-        data_loader = DataLoader(
-                    BackgroundDataset(
-                        dataset[f'x_{dataset_part}'],
-                        dataset[f'ix_{dataset_part}'],
-                        dataset[f'labels_{dataset_part}'],
-                        device=device,
-                        augmentation=vicreg,
-                        ixa=dataset[f'ixa_{dataset_part}'],),
-                    batch_size=args.batch_size,
-                    shuffle=False,
-                    drop_last=True)
-
-        instances = []
-        embeds = []
-        preds = []
-        labels = []
+        fold_instances = []
+        fold_embeds = []
+        fold_preds = []
+        fold_labels = []
 
         if vicreg:
             for x, _, label in data_loader:  #_ is augmented value
@@ -134,10 +146,10 @@ def main(args):
                     outputs = model(x)
                     _, pred = torch.max(outputs, 1)
 
-                    instances.append(x.to(device).tolist())
-                    embeds.append(outputs.to(device).tolist())
-                    preds.extend(pred.to(device).tolist())
-                    labels.extend(label.to(device).tolist())
+                    fold_instances.append(x.to(device).tolist())
+                    fold_embeds.append(outputs.to(device).tolist())
+                    fold_preds.extend(pred.to(device).tolist())
+                    fold_labels.extend(label.to(device).tolist())
         else:
             for x, label in data_loader:
                 with torch.no_grad():
@@ -145,35 +157,72 @@ def main(args):
                     outputs = model(x)
                     _, pred = torch.max(outputs, 1)
 
-                    instances.append(x.to(device).tolist())
-                    embeds.append(outputs.to(device).tolist())
-                    preds.extend(pred.to(device).tolist())
-                    labels.extend(label.to(device).tolist())
+                    fold_instances.append(x.to(device).tolist())
+                    fold_embeds.append(outputs.to(device).tolist())
+                    fold_preds.extend(pred.to(device).tolist())
+                    fold_labels.extend(label.to(device).tolist())
+        for x, label in signal_data_loader:
+            with torch.no_grad():
+                x = x.squeeze(-1)
+                outputs = model(x)
+                _, pred = torch.max(outputs, 1)
 
-        correct_predictions = sum([1 for pred, true in zip(preds, labels) if pred == true])
-        accuracy = correct_predictions / len(preds)
+                fold_instances.append(x.to(device).tolist())
+                fold_embeds.append(outputs.to(device).tolist())
+                fold_preds.extend(pred.to(device).tolist())
+                fold_labels.extend(label.to(device).tolist())
 
-        instances = np.array(instances)
-        embeds = np.array(embeds)
-        preds = np.array(preds)
-        labels = np.array(labels)
-
-        preds_dir = args.preds_dir
-        if preds_dir is not None:
-            with np.load(preds_dir) as data:
-                data_dict = {key: data[key] for key in data.keys()}
-            
-            data_dict[f'dim{dim}_embeddings'] = embeds
-            data_dict[f'dim{dim}_predictions'] = preds
-            data_dict[f'dim{dim}_labels'] = labels
-            data_dict[f'dim{dim}_accuracy'] = accuracy
-            np.savez(preds_dir, **data_dict)
-
+        # correct_predictions += sum([1 for pred, true in zip(fold_preds, fold_labels) if pred == true])
+        # num_samples = len(data_loader.dataset) + len(signal_data_loader.dataset)
+        fold_instances = np.array(fold_instances)
+        print(fold_instances.shape)
+        fold_instances = fold_instances.reshape(1, -1, fold_instances.shape[-2], fold_instances.shape[-1])
+        print(fold_instances.shape)
+        fold_embeds = np.array(fold_embeds)
+        print(fold_embeds.shape)
+        fold_embeds = fold_embeds.reshape(1, -1, 32)
+        print(fold_embeds.shape)
+        fold_preds = np.array(fold_preds).reshape(1,-1)
+        print(fold_preds.shape)
+        fold_labels = np.array(fold_labels).reshape(1,-1)
+        print(fold_labels.shape)
+        if fold == 0:
+            instances = fold_instances.copy()
+            embeds = fold_embeds.copy()
+            preds = fold_preds.copy()
+            labels = fold_labels.copy()
         else:
-            preds_dir = f"{loss_name}_predictions.npz"
-            data_dict = {'instances': instances, f'dim{dim}_embeddings': embeds, f'dim{latent_dim}_predictions': preds, \
-                        f'dim{dim}_labels': labels, f'dim{dim}_accuracy': accuracy}
-            np.savez(preds_dir, **data_dict)
+            # fold_instances = np.array(fold_instances).reshape(-1,1)
+            # fold_embeds = np.array(fold_embeds).reshape(-1,1)
+            # fold_preds = np.array(fold_preds).reshape(-1,1)
+            # fold_labels = np.array(fold_labels).reshape(-1,1)
+
+            print('instances ',instances.shape)
+            instances = np.concatenate((instances, fold_instances), axis=0)
+            print('embeds', embeds.shape)
+            embeds = np.concatenate((embeds, fold_embeds), axis=0)
+            print('preds', preds.shape)
+            preds = np.concatenate((preds, fold_preds),axis=0)
+            print('labels', labels.shape)
+            labels = np.concatenate((labels, fold_labels),axis=0)
+
+    preds_dir = args.preds_dir
+    if preds_dir is not None:
+        with np.load(preds_dir) as data:
+            data_dict = {key: data[key] for key in data.keys()}
+        
+        data_dict[f'dim{dim}_instances'] = instances
+        data_dict[f'dim{dim}_embeddings'] = embeds
+        data_dict[f'dim{dim}_predictions'] = preds
+        data_dict[f'dim{dim}_labels'] = labels
+        np.savez(preds_dir, **data_dict)
+
+    else:
+        preds_dir = f"{loss_name}_dim{dim}_kfold_predictions.npz"
+        data_dict = {f'dim{dim}_instances': instances, f'dim{dim}_embeddings': embeds, f'dim{dim}_predictions': preds, \
+                    f'dim{dim}_labels': labels}
+        np.savez(preds_dir, **data_dict)
+
 
 
 if __name__ == '__main__':
@@ -181,12 +230,11 @@ if __name__ == '__main__':
     parser = ArgumentParser()
 
     parser.add_argument('--background-dataset', type=str, default=None)
+    parser.add_argument('--anomaly-dataset', type=str, default=None)
+        # e.g. output/anomaly_dataset.npz
     parser.add_argument('--dataset-part', type=str, default=None)
         # e.g. test
     parser.add_argument('--kfold-dataset', type=str, default=None)
-
-    parser.add_argument('--latent-dim', type=int, default=3)
-    parser.add_argument('--heads', type=int, default=3)
     # parser.add_argument('--layers', type=int, default=1)
     # parser.add_argument('--expansion', type=int, default=4)
     # parser.add_argument('--dropout', type=float, default=0.1)
