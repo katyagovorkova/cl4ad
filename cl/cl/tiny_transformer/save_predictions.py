@@ -180,7 +180,7 @@ def main(args):
         print(fold_instances.shape)
         fold_embeds = np.array(fold_embeds)
         print(fold_embeds.shape)
-        fold_embeds = fold_embeds.reshape(1, -1, 32)
+        fold_embeds = fold_embeds.reshape(1, -1, dim)
         print(fold_embeds.shape)
         fold_preds = np.array(fold_preds).reshape(1,-1)
         print(fold_preds.shape)
@@ -218,7 +218,7 @@ def main(args):
         np.savez(preds_dir, **data_dict)
 
     else:
-        preds_dir = f"{loss_name}_dim{dim}_kfold_predictions.npz"
+        preds_dir = f"/n/holystore01/LABS/iaifi_lab/Users/ylanaxu/{loss_name}_dim{dim}_kfold_predictions.npz"
         data_dict = {f'dim{dim}_instances': instances, f'dim{dim}_embeddings': embeds, f'dim{dim}_predictions': preds, \
                     f'dim{dim}_labels': labels}
         np.savez(preds_dir, **data_dict)

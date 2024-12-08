@@ -66,22 +66,32 @@ class CLBackgroundDataset:
         self.n_events = n_events if n_events!=-1 else len( self.data[ next(iter(self.data)) ] )  # use specificed number of events, otherwise use all
         self.scaled_dataset = dict()  # output dataset
         self.quakstyle = quakstyle
-        for k in self.data.keys():  
-            if 'x_' in k:  # get the indices used from x and augmented x for train/test/val
-                ix, ixs = self.division_indicies(self.labels[k.replace('x', 'background_ID')], divisions, quakstyle)
-                ixa = self.get_ixa(ixs)
-                ix, ixa = shuffle(ix, ixa, random_state=0)
-                self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = ix, ixa
-                # self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = \
-                #     self.division_indicies(self.data[k], self.labels[k.replace('x', 'background_ID')], divisions)
-
         if preprocess:
             self.preprocess(preprocess)
         else:
             self.scaled_dataset['x_train'] = self.data['x_train']
             self.scaled_dataset['x_test'] = self.data['x_test']
             self.scaled_dataset['x_val'] = self.data['x_val']
+        for k in self.data.keys():  
+            if 'x_' in k:  # get the indices used from x and augmented x for train/test/val
+                ix, ixs = self.division_indicies(self.labels[k.replace('x', 'background_ID')], divisions, quakstyle)
+                ixa = self.get_ixa(ixs)
+                ix, ixa = shuffle(ix, ixa, random_state=0)
+                weights = self.get_weights(self.labels[k.replace('x','background_ID')], divisions)
+                self.scaled_dataset[k.replace('x','ix')], self.scaled_dataset[k.replace('x','ixa')] = ix, ixa
+                self.scaled_dataset[k.replace('x','weight')] = weights
+                # self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = \
+                #     self.division_indicies(self.data[k], self.labels[k.replace('x', 'background_ID')], divisions)
 
+    
+    def get_weights(self, labels, divisions):
+        weights = np.ones_like(labels, dtype=float)
+        if divisions == [1,1,1,1]: return weights
+        else: 
+            # Iterate over each unique label (0, 1, 2, 3)
+            for i, div in enumerate(divisions):
+                weights[labels == i] = div  # Assign the corresponding weight to the indices with label i
+            return weights
 
     def get_ixa(self, ixs):
         """
@@ -107,24 +117,24 @@ class CLBackgroundDataset:
 
                 indices = np.where(labels==label_category)[0]  # indices of labels that == label_category
 
-                # if need to balance dataset
-                if divisions != [1,1,1,1]:  # divisions=[1,1,1,1] when using original, unbalanced dataset
+                # # if need to balance dataset
+                # if divisions != [1,1,1,1]:  # divisions=[1,1,1,1] when using original, unbalanced dataset
 
-                    if label_category == len(divisions)-1:  # keep track of allowed total samples by number of tt events
-                        # (all of tt events should make up e.g. 20% of the data)
-                        # COMMENT: TRY WITHOUT USING ALL OF LABEL 3 DATA TO GET BETTER GENERALIZATION
-                        total_sample = int(len(indices) / divisions[label_category])  # take the floor such that label 3 events are strictly enough
+                #     if label_category == len(divisions)-1:  # keep track of allowed total samples by number of tt events
+                #         # (all of tt events should make up e.g. 20% of the data)
+                #         # COMMENT: TRY WITHOUT USING ALL OF LABEL 3 DATA TO GET BETTER GENERALIZATION
+                #         total_sample = int(len(indices) / divisions[label_category])  # take the floor such that label 3 events are strictly enough
                     
-                    if label_category != (0):  # if not the first category, simply calculate and round
-                        # calculate number of samples needed as specified by division proportions
-                        label_sample_size = round(divisions[label_category] * total_sample) 
-                        used += label_sample_size
+                #     if label_category != (0):  # if not the first category, simply calculate and round
+                #         # calculate number of samples needed as specified by division proportions
+                #         label_sample_size = round(divisions[label_category] * total_sample) 
+                #         used += label_sample_size
 
-                    else:  # if first category, subtract to get the remaining samples
-                        label_sample_size = total_sample - used
+                #     else:  # if first category, subtract to get the remaining samples
+                #         label_sample_size = total_sample - used
 
-                    # sample the indices with/without replacement
-                    indices = list(np.random.choice(indices, size=label_sample_size, replace=False))
+                #     # sample the indices with/without replacement
+                #     indices = list(np.random.choice(indices, size=label_sample_size, replace=False))
                 # add sampled indices to ix
                 ix.extend(indices)
                 ixs.append(indices)
@@ -146,14 +156,17 @@ class CLBackgroundDataset:
             ix_train=self.scaled_dataset['ix_train'],
             ixa_train=self.scaled_dataset['ixa_train'],
             labels_train=self.labels['background_ID_train'],
+            weight_train=self.scaled_dataset['weight_train'],
             x_test=self.scaled_dataset['x_test'],
             ix_test=self.scaled_dataset['ix_test'],
             ixa_test=self.scaled_dataset['ixa_test'],
             labels_test=self.labels['background_ID_test'],
+            weight_test=self.scaled_dataset['weight_test'],
             x_val=self.scaled_dataset['x_val'],
             ix_val=self.scaled_dataset['ix_val'],
             ixa_val=self.scaled_dataset['ixa_val'],
             labels_val=self.labels['background_ID_val'],
+            weight_val=self.scaled_dataset['weight_val'],
             )
         print(f'{filename} successfully saved')
 
@@ -259,7 +272,7 @@ if __name__=='__main__':
     parser.add_argument('--mix-in-anomalies', action='store_true')
 
     parser.add_argument('--for-transformer', type=str, default=None)
-    parser.add_argument('--divisions', type=list, default=[1,1,1,1])  # [1,1,1,1] = unbalanced
+    parser.add_argument('--divisions', type=list, default=[.25,.25,.25,.25])  # [1,1,1,1] = unbalanced
 
     args = parser.parse_args()
 
